@@ -167,7 +167,7 @@ class ArayBot:
                 self.current_index = (self.current_index + 1) % len(self.words)
                 
                 # انتظار 15 ثانية
-                for i in range(15):
+                for i in range(60):
                     if not self.is_active:
                         break
                     time.sleep(1)
