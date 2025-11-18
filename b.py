@@ -150,7 +150,7 @@ class ArayBot:
             bot.send_message(group_chat_id, "⏹️ توقف البوت")
         except Exception as e:
             print(f"خطأ في الإرسال: {e}")
-        return "تم إيقاف البوت ✅"
+        return " وصلت حبي سكتنه😗"
     
     def _sending_loop(self):
         """حلقة الإرسال الرئيسية في المجموعة"""
@@ -167,7 +167,7 @@ class ArayBot:
                 self.current_index = (self.current_index + 1) % len(self.words)
                 
                 # انتظار 15 ثانية
-                for i in range(3):
+                for i in range(15):
                     if not self.is_active:
                         break
                     time.sleep(1)
@@ -203,7 +203,7 @@ def handle_all_messages(message):
     chat_type = message.chat.type
     
     try:
-        if text == "اراي٢":
+        if text == "اراي":
             # بدء البوت في المجموعة
             if chat_type == "group" or chat_type == "supergroup":
                 result = aray_bot.start_sending(message.chat.id)
@@ -211,7 +211,7 @@ def handle_all_messages(message):
             else:
                 bot.reply_to(message, "⚠️ هذا الأمر يعمل في المجموعات فقط!")
         
-        elif text == "اراي":
+        elif text == "اراي٢":
             # إيقاف البوت في المجموعة
             if chat_type == "group" or chat_type == "supergroup":
                 result = aray_bot.stop_sending(message.chat.id)
