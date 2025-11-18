@@ -1,11 +1,10 @@
 import telebot
 import time
 import threading
-from datetime import datetime
 import socket
 import socks
 
-# 🔧 إعداد Tor
+# إعداد Tor
 socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 9050)
 socket.socket = socks.socksocket
 
@@ -18,20 +17,19 @@ class ArayBot:
         self.words = ["كت", "نن", "ل", "غ"]
         self.current_index = 0
         self.group_chat_id = None
-        self.user_chat_id = None
         
-    def start_sending(self, group_chat_id, user_chat_id):
-        """بدء إرسال الكلمات"""
+    def start_sending(self, group_chat_id):
+        """بدء إرسال الكلمات في المجموعة"""
         if self.is_active:
-            return "البوت يعمل بالفعل!"
+            return "⏳ البوت يعمل بالفعل!"
         
         self.is_active = True
         self.group_chat_id = group_chat_id
-        self.user_chat_id = user_chat_id
+        self.current_index = 0
         
-        # إرسال رسالة البدء
+        # إرسال رسالة البدء في المجموعة
         try:
-            bot.send_message(user_chat_id, "🎯 بدأ البوت في إرسال الكلمات كل 15 ثانية\n🛡️ متصل عبر Tor")
+            bot.send_message(group_chat_id, "🚀 بدأ البوت")
         except Exception as e:
             print(f"خطأ في الإرسال: {e}")
         
@@ -40,30 +38,30 @@ class ArayBot:
         thread.daemon = True
         thread.start()
         
-        return "بدأ البوت العمل 🚀\n🛡️ متصل عبر Tor"
+        return "بدأ البوت العمل 🚀"
     
-    def stop_sending(self, user_chat_id):
+    def stop_sending(self, group_chat_id):
         """إيقاف إرسال الكلمات"""
         if not self.is_active:
             return "البوت متوقف بالفعل!"
         
         self.is_active = False
         try:
-            bot.send_message(user_chat_id, "⏹️ توقف البوت عن الإرسال")
+            bot.send_message(group_chat_id, "⏹️ توقف البوت")
         except Exception as e:
             print(f"خطأ في الإرسال: {e}")
         return "تم إيقاف البوت ✅"
     
     def _sending_loop(self):
-        """حلقة الإرسال الرئيسية"""
+        """حلقة الإرسال الرئيسية في المجموعة"""
         while self.is_active:
             try:
                 # الحصول على الكلمة الحالية
                 word = self.words[self.current_index]
                 
-                # إرسال الكلمة على انفراد للمستخدم
-                bot.send_message(self.user_chat_id, f"📨 {word}")
-                print(f"✅ تم إرسال: {word} - {datetime.now().strftime('%H:%M:%S')}")
+                # إرسال الكلمة في المجموعة بدون أي إضافات
+                bot.send_message(self.group_chat_id, word)
+                print(f"✅ تم إرسال في المجموعة: {word}")
                 
                 # الانتقال للكلمة التالية
                 self.current_index = (self.current_index + 1) % len(self.words)
@@ -76,7 +74,6 @@ class ArayBot:
                     
             except Exception as e:
                 print(f"❌ خطأ في الإرسال: {e}")
-                # إعادة المحاولة بعد وقت
                 time.sleep(15)
 
 # كائن البوت
@@ -86,61 +83,47 @@ aray_bot = ArayBot()
 def start(message):
     """رسالة الترحيب"""
     welcome = """
-🎯 **بوت أراي للكلمات**
+🎯 بوت أراي للكلمات
 
-🛡️ **متصل عبر Tor للحماية**
+📝 طريقة الاستخدام في المجموعة:
+• اراي٢ - بدء إرسال الكلمات
+• اراي - إوقف البوت
 
-📝 **طريقة الاستخدام:**
-1. أضف البوت لمجموعتك
-2. في المجموعة، اكتب:
-   - `اراي` ⏹️ لإيقاف البوت
-   - `اراي٢` 🚀 لبدء البوت
-
-🔄 **وظيفة البوت:**
-• يرسل كلمات (كت، نن، ل، غ) كل 15 ثانية
-• الإرسال على انفراد لك
-• يمكن التحكم به من المجموعة
-• يعمل عبر Tor لإخفاء الهوية
-
-🚀 **للبداية:** اكتب في المجموعة `اراي٢`
+🔄 الوظيفة:
+• يرسل كلمات (كت، نن، ل، غ) في المجموعة
+• كل 15 ثانية كلمة جديدة
+• بدون أي إضافات أو رموز
 """
-    try:
-        bot.send_message(message.chat.id, welcome, parse_mode='Markdown')
-    except Exception as e:
-        print(f"خطأ في إرسال الترحيب: {e}")
+    bot.send_message(message.chat.id, welcome)
 
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
     """معالجة جميع الرسائل"""
-    text = message.text.strip().lower()
+    text = message.text.strip()
     chat_type = message.chat.type
     
     try:
         if text == "اراي٢":
-            # بدء البوت
+            # بدء البوت في المجموعة
             if chat_type == "group" or chat_type == "supergroup":
-                result = aray_bot.start_sending(message.chat.id, message.from_user.id)
+                result = aray_bot.start_sending(message.chat.id)
                 bot.reply_to(message, result)
             else:
                 bot.reply_to(message, "⚠️ هذا الأمر يعمل في المجموعات فقط!")
         
         elif text == "اراي":
-            # إيقاف البوت
+            # إيقاف البوت في المجموعة
             if chat_type == "group" or chat_type == "supergroup":
-                result = aray_bot.stop_sending(message.from_user.id)
+                result = aray_bot.stop_sending(message.chat.id)
                 bot.reply_to(message, result)
             else:
                 bot.reply_to(message, "⚠️ هذا الأمر يعمل في المجموعات فقط!")
         
         elif chat_type == "private":
-            bot.reply_to(message, "❓ اكتب /start للمساعدة")
+            bot.reply_to(message, "❓ أضف البوت للمجموعة ثم اكتب 'اراي٢'")
             
     except Exception as e:
         print(f"❌ خطأ في معالجة الرسالة: {e}")
-        try:
-            bot.reply_to(message, "❌ حدث خطأ، حاول مرة أخرى")
-        except:
-            pass
 
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_members(message):
@@ -148,53 +131,15 @@ def welcome_new_members(message):
     try:
         for member in message.new_chat_members:
             if member.is_bot and member.username == bot.get_me().username:
-                welcome_msg = """
-🎯 **بوت أراي للكلمات انضم للمجموعة**
-
-🛡️ **متصل عبر Tor**
-
-📝 **الأوامر المتاحة:**
-• `اراي٢` - بدء إرسال الكلمات
-• `اراي` - إيقاف الإرسال
-
-🔄 **الوظيفة:** يرسل كلمات كل 15 ثانية على انفراد
-"""
+                welcome_msg = "🎯 بوت أراي للكلمات\n\nاكتب 'اراي٢' لبدء العمل"
                 bot.send_message(message.chat.id, welcome_msg)
                 break
     except Exception as e:
         print(f"❌ خطأ في ترحيب الأعضاء: {e}")
 
-def check_tor_connection():
-    """فحص اتصال Tor"""
-    try:
-        import requests
-        # استخدام جلسة مع Tor
-        session = requests.Session()
-        session.proxies = {
-            'http': 'socks5h://127.0.0.1:9050',
-            'https': 'socks5h://127.0.0.1:9050'
-        }
-        
-        response = session.get('https://check.torproject.org/', timeout=10)
-        if 'Congratulations' in response.text:
-            print("✅ Tor يعمل بشكل صحيح")
-            return True
-        else:
-            print("⚠️ Tor يعمل ولكن قد لا يكون مخفي")
-            return True
-    except Exception as e:
-        print(f"❌ فشل فحص Tor: {e}")
-        return False
-
 if __name__ == "__main__":
-    print("🔍 جاري فحص اتصال Tor...")
-    
-    if check_tor_connection():
-        print("🚀 بدء تشغيل بوت أراي عبر Tor...")
-        try:
-            bot.polling(none_stop=True, timeout=60)
-        except Exception as e:
-            print(f"❌ خطأ في تشغيل البوت: {e}")
-    else:
-        print("❌ Tor غير متوفر! تأكد من تشغيل Tor أولاً")
-        print("💡 تشغيل Tor: tor &")
+    print("🚀 بدء تشغيل بوت أراي عبر Tor...")
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        print(f"❌ خطأ في تشغيل البوت: {e}")
