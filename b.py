@@ -14,7 +14,7 @@ bot = telebot.TeleBot(TOKEN)
 class ArayBot:
     def __init__(self):
         self.is_active = False
-        self.words = ["كت", "نن", "ل", "غ"]
+        self.words = ["مرحبت", "نايمين", "منو يساعدني بشغله", "غ" , "مليت اريد ارتبط😅" , "افتحو الاتصال"]
         self.current_index = 0
         self.group_chat_id = None
         
