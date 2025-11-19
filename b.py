@@ -9,6 +9,11 @@ from telegram.constants import ChatAction
 # استيراد العبارات
 from phrases import IRAQI_PHRASES
 
+# ✅ الإضافة الجديدة: استيراد النظام المحلي
+from questions import QUESTION_CATEGORIES
+from answers import get_random_answer
+from qa_matcher import qa_matcher
+
 # تفعيل التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,52 +40,58 @@ async def set_bot_commands(application):
 async def handle_ai_response(user_message, reply_to_message_id, chat_id, context):
     """معالجة الرد من الذكاء الاصطناعي"""
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
+        # ✅ الإضافة الجديدة: البحث في النظام المحلي أولاً
+        local_answer = qa_matcher.get_answer(user_message)
         
-        prompt = f"أجب بإجابة مختصرة جداً (جملة واحدة) باللهجة العراقية: {user_message}"
+        if local_answer:
+            # ✅ وجدنا إجابة محلية - استخدامها مباشرة (أسرع وأفضل)
+            ai_response = local_answer
+            logger.info(f"✅ استخدام الإجابة المحلية: {ai_response}")
+        else:
+            # ❌ لا توجد إجابة محلية - استخدام Gemini AI (الكود الأصلي)
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
+            
+            prompt = f"أجب بإجابة مختصرة جداً (جملة واحدة) باللهجة العراقية: {user_message}"
+            
+            response = requests.post(
+                url,
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                full_response = result['candidates'][0]['content']['parts'][0]['text']
+                
+                # تقصير الرد
+                if len(full_response) > 100:
+                    sentences = full_response.split('.')
+                    ai_response = '.'.join(sentences[:1]) + '.'
+                else:
+                    ai_response = full_response
+                
+                logger.info(f"✅ استخدام Gemini AI: {ai_response}")
+            else:
+                ai_response = "😊 آسف، حاول مرة ثانية"
         
-        response = requests.post(
-            url,
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=15
+        # ✅ الإصلاح: حفظ رسالة الرد في القائمة
+        message = await context.bot.send_message(
+            chat_id=chat_id,
+            text=ai_response,
+            reply_to_message_id=reply_to_message_id
         )
         
-        if response.status_code == 200:
-            result = response.json()
-            full_response = result['candidates'][0]['content']['parts'][0]['text']
-            
-            # تقصير الرد
-            if len(full_response) > 100:
-                sentences = full_response.split('.')
-                ai_response = '.'.join(sentences[:1]) + '.'
-            else:
-                ai_response = full_response
-            
-            # ✅ الإصلاح: حفظ رسالة الرد في القائمة
-            message = await context.bot.send_message(
-                chat_id=chat_id,
-                text=ai_response,
-                reply_to_message_id=reply_to_message_id
-            )
-            
-            # ✅ حفظ رسالة الرد في القائمة
-            if chat_id not in bot_messages:
-                bot_messages[chat_id] = []
-            bot_messages[chat_id].append(message.message_id)
-            
-            # الاحتفاظ بآخر 15 رسائل فقط (زيدنا الرقم)
-            if len(bot_messages[chat_id]) > 15:
-                bot_messages[chat_id] = bot_messages[chat_id][-15:]
-            
-            logger.info(f"✅ تم الرد وحفظ الرسالة {message.message_id}")
-            
-        else:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="😊 آسف، حاول مرة ثانية",
-                reply_to_message_id=reply_to_message_id
-            )
-            
+        # ✅ حفظ رسالة الرد في القائمة
+        if chat_id not in bot_messages:
+            bot_messages[chat_id] = []
+        bot_messages[chat_id].append(message.message_id)
+        
+        # الاحتفاظ بآخر 15 رسائل فقط (زيدنا الرقم)
+        if len(bot_messages[chat_id]) > 15:
+            bot_messages[chat_id] = bot_messages[chat_id][-15:]
+        
+        logger.info(f"✅ تم الرد وحفظ الرسالة {message.message_id}")
+        
     except Exception as e:
         await context.bot.send_message(
             chat_id=chat_id,
@@ -128,17 +139,25 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.chat.send_action(action=ChatAction.TYPING)
         
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
-            prompt = f"أجب بإجابة مختصرة باللهجة العراقية: {user_message}"
+            # ✅ الإضافة الجديدة: استخدام النظام المحلي أولاً
+            local_answer = qa_matcher.get_answer(user_message)
             
-            response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10)
-            
-            if response.status_code == 200:
-                result = response.json()
-                ai_response = result['candidates'][0]['content']['parts'][0]['text']
+            if local_answer:
+                ai_response = local_answer
+                logger.info(f"✅ استخدام الإجابة المحلية في الخاص: {ai_response}")
             else:
-                ai_response = "❌ حدث خطأ"
+                # استخدام Gemini AI كبديل (الكود الأصلي)
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
+                prompt = f"أجب بإجابة مختصرة باللهجة العراقية: {user_message}"
                 
+                response = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    ai_response = result['candidates'][0]['content']['parts'][0]['text']
+                else:
+                    ai_response = "❌ حدث خطأ"
+                    
         except Exception as e:
             ai_response = "⚠️ معليش، ما قدرت أرد هسه"
         
@@ -236,6 +255,10 @@ def main():
         application.post_init = lambda app: set_bot_commands(app)
         
         logger.info("🚀 البوت قمر يعمل...")
+        # ✅ الإضافة الجديدة: إظهار إحصائيات النظام المحلي
+        total_questions = sum(len(q) for q in QUESTION_CATEGORIES.values())
+        logger.info(f"💾 النظام المحلي جاهز: {total_questions} سؤال في {len(QUESTION_CATEGORIES)} فئة")
+        
         application.run_polling()
         
     except Exception as e:
