@@ -3,7 +3,7 @@ from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
 TELEGRAM_TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
-DEEPSEEK_API_KEY = "sk-9c52f37206c24fd39502d5a6d71fb406"
+DEEPSEEK_API_KEY = "sk-ef7adaec26e9475a847d295ce17ee6f2"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
