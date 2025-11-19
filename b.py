@@ -2,31 +2,35 @@ import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import logging
+import asyncio
 
 # تفعيل التسجيل
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger.getLogger(__name__)
 
 TELEGRAM_TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
 GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
 
 # تخزين بيانات المجموعات
 active_groups = {}
+group_tasks = {}
 
-async def send_group_message(context: ContextTypes.DEFAULT_TYPE):
+async def send_group_message(chat_id, context):
     """إرسال رسالة إلى المجموعة كل 5 دقائق"""
-    chat_id = context.job.chat_id
-    
     try:
-        message = await context.bot.send_message(
-            chat_id=chat_id,
-            text="🤖 **البوت المساعد نشط!**\n\nاسألني أي شيء بالرد على هذه الرسالة وسأجيبك فوراً! 💬"
-        )
-        
-        # حفظ آخر رسالة للبوت
-        active_groups[chat_id] = message.message_id
-        logger.info(f"📤 تم إرسال رسالة إلى المجموعة {chat_id}")
-        
+        while chat_id in active_groups:
+            message = await context.bot.send_message(
+                chat_id=chat_id,
+                text="🤖 **البوت المساعد نشط!**\n\nاسألني أي شيء بالرد على هذه الرسالة وسأجيبك فوراً! 💬"
+            )
+            
+            # حفظ آخر رسالة للبوت
+            active_groups[chat_id] = message.message_id
+            logger.info(f"📤 تم إرسال رسالة إلى المجموعة {chat_id}")
+            
+            # انتظر 5 دقائق
+            await asyncio.sleep(300)
+            
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال الرسالة: {e}")
 
@@ -146,21 +150,23 @@ async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
     
     try:
-        # إيقاف أي وظيفة سابقة
-        current_jobs = context.job_queue.get_jobs_by_name(str(chat_id))
-        for job in current_jobs:
-            job.schedule_removal()
+        # إيقاف أي مهمة سابقة
+        if chat_id in group_tasks:
+            group_tasks[chat_id].cancel()
         
-        # إضافة وظيفة جديدة
-        context.job_queue.run_repeating(
-            send_group_message,
-            interval=300,  # كل 5 دقائق
-            first=5,       # بعد 5 ثواني
-            chat_id=chat_id,
-            name=str(chat_id)
-        )
-        
+        # تفعيل المجموعة
         active_groups[chat_id] = None
+        
+        # إرسال أول رسالة فوراً
+        message = await context.bot.send_message(
+            chat_id=chat_id,
+            text="🤖 **البوت المساعد نشط!**\n\nاسألني أي شيء بالرد على هذه الرسالة وسأجيبك فوراً! 💬"
+        )
+        active_groups[chat_id] = message.message_id
+        
+        # بدء المهمة التلقائية
+        task = asyncio.create_task(send_group_message(chat_id, context))
+        group_tasks[chat_id] = task
         
         await update.message.reply_text(
             "✅ **تم تفعيل البوت!**\n\n"
@@ -178,10 +184,10 @@ async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
     
     try:
-        # إزالة الوظيفة
-        current_jobs = context.job_queue.get_jobs_by_name(str(chat_id))
-        for job in current_jobs:
-            job.schedule_removal()
+        # إيقاف المهمة
+        if chat_id in group_tasks:
+            group_tasks[chat_id].cancel()
+            del group_tasks[chat_id]
         
         if chat_id in active_groups:
             del active_groups[chat_id]
@@ -204,9 +210,9 @@ def main():
         
         logger.info("🚀 البوت يعمل...")
         print("✅ جرب في المجموعة:")
-        print("1. /startbot")
-        print("2. انتظر 5 ثواني")
-        print("3. رد على رسالة البوت")
+        print("1. /startbot - سيرسل رسالة فوراً")
+        print("2. رد على رسالة البوت")
+        print("3. /stopbot - لإيقاف البوت")
         
         application.run_polling()
         
