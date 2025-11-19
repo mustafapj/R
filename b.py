@@ -1,27 +1,41 @@
 import requests
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
-API_KEY = "sk-ef7adaec26e9475a847d295ce17ee6f2"
+TELEGRAM_TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
+GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"  # ضعه هنا
 
-url = "https://api.deepseek.com/v1/chat/completions"
-
-headers = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
-}
-
-data = {
-    "model": "deepseek-chat",
-    "messages": [{"role": "user", "content": "hello"}],
-    "max_tokens": 5
-}
-
-try:
-    response = requests.post(url, headers=headers, json=data, timeout=10)
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    await update.message.chat.send_action(action="typing")
     
-    if response.status_code == 200:
-        print("✅ المفتاح متصل")
-    else:
-        print("❌ المفتاح غير متصل")
+    try:
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}",
+            json={
+                "contents": [{
+                    "parts": [{"text": user_message}]
+                }]
+            },
+            timeout=30
+        )
         
-except:
-    print("❌ المفتاح غير متصل")
+        if response.status_code == 200:
+            result = response.json()
+            ai_response = result['candidates'][0]['content']['parts'][0]['text']
+        else:
+            ai_response = "❌ حدث خطأ في الاتصال"
+            
+    except Exception as e:
+        ai_response = f"⚠️ خطأ: {str(e)}"
+    
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=ai_response)
+
+def main():
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    print("🚀 البوت يعمل مع Gemini API!")
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
