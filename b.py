@@ -1,152 +1,168 @@
 import requests
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
-import asyncio
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import logging
+
+# تفعيل التسجيل لرؤية المشاكل
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
 GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
 
-# تخزين آخر رسالة للبوت في كل مجموعة
-bot_messages = {}
+# تخزين بيانات المجموعات
+active_groups = {}
 
-async def send_auto_message(context: ContextTypes.DEFAULT_TYPE):
-    """إرسال رسالة تلقائية كل دقيقة"""
+async def send_group_message(context: ContextTypes.DEFAULT_TYPE):
+    """إرسال رسالة إلى المجموعة كل 5 دقائق"""
     chat_id = context.job.chat_id
     
     try:
-        # إرسال رسالة من البوت
         message = await context.bot.send_message(
             chat_id=chat_id,
-            text="🤖 مرحبا بالجميع! أنا البوت المساعد\nاسألني أي شيء بالرد على هذه الرسالة! 💬"
+            text="🤖 **البوت المساعد نشط!**\n\nاسألني أي شيء بالرد على هذه الرسالة وسأجيبك فوراً! 💬"
         )
         
-        # حفظ معرف الرسالة للبوت
-        bot_messages[chat_id] = message.message_id
-        print(f"📤 تم إرسال رسالة في المجموعة {chat_id}")
+        # حفظ آخر رسالة للبوت
+        active_groups[chat_id] = message.message_id
+        logger.info(f"📤 تم إرسال رسالة إلى المجموعة {chat_id}")
         
     except Exception as e:
-        print(f"❌ خطأ في إرسال الرسالة: {e}")
+        logger.error(f"❌ خطأ في إرسال الرسالة: {e}")
 
-async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالجة الرسائل في المجموعة"""
+async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالجة جميع الرسائل"""
     
-    # التأكد أن الرسالة في مجموعة وليست محادثة خاصة
-    if not update.message or not update.message.chat or update.message.chat.type == "private":
-        return
+    # طباعة معلومات الرسالة للتشخيص
+    logger.info(f"📩 رسالة مستلمة: {update.message.text}")
+    logger.info(f"👤 من: {update.message.from_user.first_name}")
+    logger.info(f"💬 نوع الدردشة: {update.message.chat.type}")
+    logger.info(f"🆔 معرف الدردشة: {update.message.chat.id}")
     
-    chat_id = update.message.chat.id
-    user_message = update.message.text
-    reply_to_message = update.message.reply_to_message
-    
-    # إذا كانت الرسالة رداً على البوت
-    if (reply_to_message and 
-        reply_to_message.from_user.id == context.bot.id and
-        chat_id in bot_messages and
-        reply_to_message.message_id == bot_messages[chat_id]):
+    # إذا كانت محادثة خاصة
+    if update.message.chat.type == "private":
+        user_message = update.message.text
         
-        print(f"🔄 رد من مستخدم في المجموعة {chat_id}: {user_message}")
-        
-        # إظهار "يكتب..."
         await update.message.chat.send_action(action="typing")
         
         try:
-            # استخدام Gemini API للرد
+            # استخدام Gemini API
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
             
             response = requests.post(
                 url,
-                json={
-                    "contents": [{
-                        "parts": [{"text": user_message}]
-                    }]
-                },
+                json={"contents": [{"parts": [{"text": user_message}]}]},
                 timeout=20
             )
             
             if response.status_code == 200:
                 result = response.json()
                 ai_response = result['candidates'][0]['content']['parts'][0]['text']
-                
-                # الرد على المستخدم مع ذكر اسمه
-                user_name = update.message.from_user.first_name
-                response_text = f"👤 {user_name}:\n{ai_response}"
-                
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=response_text,
-                    reply_to_message_id=update.message.message_id
-                )
-                print(f"✅ تم الرد على المستخدم في المجموعة {chat_id}")
-                
             else:
-                print(f"❌ خطأ في API: {response.status_code}")
+                ai_response = "❌ حدث خطأ في الخادم"
                 
         except Exception as e:
-            print(f"⚠️ خطأ في معالجة الرد: {e}")
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="❌ عذراً، حدث خطأ في الرد. حاول مرة أخرى!",
-                reply_to_message_id=update.message.message_id
-            )
+            ai_response = f"⚠️ خطأ: {str(e)}"
+        
+        await update.message.reply_text(ai_response)
+        return
+    
+    # إذا كانت في مجموعة
+    if update.message.chat.type in ["group", "supergroup"]:
+        chat_id = update.message.chat.id
+        user_message = update.message.text
+        reply_to = update.message.reply_to_message
+        
+        # إذا كان رداً على رسالة البوت
+        if (reply_to and 
+            reply_to.from_user and 
+            reply_to.from_user.id == context.bot.id and
+            chat_id in active_groups and
+            reply_to.message_id == active_groups[chat_id]):
+            
+            logger.info(f"🔄 رد من مستخدم في المجموعة: {user_message}")
+            
+            await update.message.chat.send_action(action="typing")
+            
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
+                
+                response = requests.post(
+                    url,
+                    json={"contents": [{"parts": [{"text": user_message}]}]},
+                    timeout=20
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    ai_response = result['candidates'][0]['content']['parts'][0]['text']
+                    
+                    response_text = f"👤 {update.message.from_user.first_name}:\n{ai_response}"
+                    
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=response_text,
+                        reply_to_message_id=update.message.message_id
+                    )
+                    logger.info(f"✅ تم الرد في المجموعة {chat_id}")
+                    
+                else:
+                    logger.error(f"❌ خطأ API: {response.status_code}")
+                    
+            except Exception as e:
+                logger.error(f"⚠️ خطأ في الرد: {e}")
 
-async def start_bot_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """بدء البوت في المجموعة (يتم استدعاؤه يدوياً)"""
+async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تشغيل البوت في المجموعة"""
     chat_id = update.message.chat.id
     
-    # إضافة وظيفة إرسال الرسائل التلقائية
+    # إضافة وظيفة الإرسال التلقائي
     context.job_queue.run_repeating(
-        send_auto_message,
-        interval=3,  # كل 60 ثانية (دقيقة)
-        first=1,     # بعد 10 ثواني من التشغيل
+        send_group_message,
+        interval=300,  # كل 5 دقائق
+        first=5,       # بعد 5 ثواني
         chat_id=chat_id,
         name=str(chat_id)
     )
     
+    active_groups[chat_id] = None
+    
     await update.message.reply_text(
-        "✅ تم تفعيل البوت في هذه المجموعة!\n"
-        "سأرسل رسالة كل دقيقة وسترد على أي رد من الأعضاء! 🤖"
+        "✅ **تم تفعيل البوت!**\n\n"
+        "سأرسل رسالة كل 5 دقائق وسأرد على أي رد من الأعضاء! 🤖"
     )
+    logger.info(f"🚀 تم تفعيل البوت في المجموعة {chat_id}")
 
-async def stop_bot_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """إيقاف البوت في المجموعة"""
     chat_id = update.message.chat.id
     
-    # إيقاف الوظيفة
+    # إزالة الوظيفة
     current_jobs = context.job_queue.get_jobs_by_name(str(chat_id))
     for job in current_jobs:
         job.schedule_removal()
     
-    # حذف الرسالة المحفوظة
-    if chat_id in bot_messages:
-        del bot_messages[chat_id]
+    if chat_id in active_groups:
+        del active_groups[chat_id]
     
-    await update.message.reply_text("⏹️ تم إيقاف البوت في هذه المجموعة!")
+    await update.message.reply_text("⏹️ **تم إيقاف البوت!**")
+    logger.info(f"⏹️ تم إيقاف البوت في المجموعة {chat_id}")
+
+async def test_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """اختبار البوت"""
+    await update.message.reply_text("🤖 **البوت يعمل!**\nجرب الرسائل الخاصة أو استخدم /startbot في المجموعة")
 
 def main():
-    # إنشاء تطبيق البوت
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # إضافة المعالجات
-    application.add_handler(MessageHandler(
-        filters.TEXT & filters.ChatType.GROUPS, 
-        handle_group_message
-    ))
+    # إضافة جميع المعالجات
+    application.add_handler(CommandHandler("start", test_bot))
+    application.add_handler(CommandHandler("startbot", start_bot))
+    application.add_handler(CommandHandler("stopbot", stop_bot))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_messages))
     
-    # أوامر التحكم
-    application.add_handler(MessageHandler(
-        filters.Command("startbot") & filters.ChatType.GROUPS, 
-        start_bot_in_group
-    ))
-    
-    application.add_handler(MessageHandler(
-        filters.Command("stopbot") & filters.ChatType.GROUPS, 
-        stop_bot_in_group
-    ))
-    
-    print("🚀 البوت جاهز للعمل في المجموعات!")
-    print("💡 الأوامر المتاحة في المجموعات:")
-    print("/startbot - تفعيل البوت")
-    print("/stopbot - إيقاف البوت")
+    logger.info("🚀 البوت يعمل وجاهز لاستقبال الرسائل...")
+    print("🔍 راقب السجلات لرؤية الرسائل الواردة")
     
     application.run_polling()
 
