@@ -10,7 +10,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(action="typing")
     
     try:
-        # استخدام أحدث نموذج مستقر: gemini-2.0-flash-001
+        # استخدام gemini-2.0-flash-001
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
         
         response = requests.post(
@@ -29,10 +29,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = response.json()
             ai_response = result['candidates'][0]['content']['parts'][0]['text']
         else:
-            ai_response = f"❌ خطأ {response.status_code}: {response.text[:100]}"
+            ai_response = f"❌ خطأ في API: {response.status_code}"
             
     except Exception as e:
-        ai_response = f"⚠️ {str(e)}"
+        ai_response = f"⚠️ خطأ: {str(e)}"
     
     await context.bot.send_message(chat_id=update.effective_chat.id, text=ai_response)
 
