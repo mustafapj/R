@@ -17,4 +17,4 @@ pip install -r requirements.txt
 
 # تشغيل البوت
 echo "🤖 تشغيل البوت الرئيسي..."
-python bot.py
+python b.py
