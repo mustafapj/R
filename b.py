@@ -308,6 +308,29 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📞 المطور: {OWNER_USERNAME}"
     )
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """حالة البوت"""
+    chat_id = update.message.chat.id
+    
+    if chat_id in active_groups and active_groups[chat_id]:
+        status = "🟢 مشغل"
+        messages_count = len(bot_messages.get(chat_id, []))
+    else:
+        status = "🔴 متوقف"
+        messages_count = 0
+    
+    await update.message.reply_text(f"""
+    📊 حالة البوت:
+    
+    الحالة: {status}
+    الرسائل المحفوظة: {messages_count}
+    المجموعات النشطة: {len(active_groups)}
+    
+    💾 النظام المحلي:
+    - الأسئلة: {len(SIMPLE_QA)}
+    - القناة: {CHANNEL_USERNAME}
+    """)
+
 def main():
     try:
         application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -317,6 +340,7 @@ def main():
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("startbot", start_bot))
         application.add_handler(CommandHandler("stopbot", stop_bot))
+        application.add_handler(CommandHandler("status", status_command))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_messages))
         
         # تعيين الأوامر
