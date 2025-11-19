@@ -19,7 +19,7 @@ GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
 # تخزين البيانات
 active_groups = {}
 group_tasks = {}
-bot_messages = {}  # تخزين آخر 10 رسائل للبوت في كل مجموعة
+bot_messages = {}
 
 async def send_group_message(chat_id, context):
     """إرسال رسالة إلى المجموعة كل 2-3 دقائق"""
@@ -43,7 +43,7 @@ async def send_group_message(chat_id, context):
             if len(bot_messages[chat_id]) > 10:
                 bot_messages[chat_id] = bot_messages[chat_id][-10:]
             
-            logger.info(f"📤 تم إرسال رسالة إلى المجموعة {chat_id}")
+            logger.info(f"📤 تم إرسال رسالة إلى المجموعة {chat_id}: {phrase}")
             
             # انتظر 2-3 دقائق عشوائياً
             await asyncio.sleep(random.randint(120, 180))
@@ -58,11 +58,15 @@ async def handle_ai_response(user_message, reply_to_message_id, chat_id, context
         
         prompt = f"أجب بإجابة مختصرة جداً (جملة واحدة) باللهجة العراقية: {user_message}"
         
+        logger.info(f"🔄 جاري إرسال طلب إلى API: {user_message}")
+        
         response = requests.post(
             url,
             json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=15
         )
+        
+        logger.info(f"📡 استجابة API: {response.status_code}")
         
         if response.status_code == 200:
             result = response.json()
@@ -75,6 +79,8 @@ async def handle_ai_response(user_message, reply_to_message_id, chat_id, context
             else:
                 ai_response = full_response
             
+            logger.info(f"✅ الرد النهائي: {ai_response}")
+            
             # إرسال الرد
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -84,6 +90,7 @@ async def handle_ai_response(user_message, reply_to_message_id, chat_id, context
             logger.info(f"✅ تم الرد في المجموعة {chat_id}")
             
         else:
+            logger.error(f"❌ خطأ API: {response.status_code} - {response.text}")
             await context.bot.send_message(
                 chat_id=chat_id,
                 text="😊 آسف، حاول مرة ثانية",
@@ -106,6 +113,8 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     user_message = update.message.text
     chat_id = update.message.chat.id
+    
+    logger.info(f"📩 رسالة مستلمة في {chat_id}: {user_message}")
     
     # إذا كانت محادثة خاصة
     if update.message.chat.type == "private":
@@ -138,21 +147,38 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.message.chat.type in ["group", "supergroup"]:
         reply_to = update.message.reply_to_message
         
+        logger.info(f"🔍 التحقق من الرسالة في المجموعة {chat_id}")
+        logger.info(f"📝 الرسالة: {user_message}")
+        logger.info(f"🔄 reply_to: {reply_to}")
+        logger.info(f"📋 bot_messages: {bot_messages.get(chat_id, [])}")
+        
         # التحقق إذا كان رداً على أي رسالة للبوت
         is_reply_to_bot = False
-        if reply_to and reply_to.from_user and reply_to.from_user.id == context.bot.id:
-            if chat_id in bot_messages and reply_to.message_id in bot_messages[chat_id]:
-                is_reply_to_bot = True
+        if reply_to and reply_to.from_user:
+            logger.info(f"👤 مرسل الرسالة الأصلية: {reply_to.from_user.id}")
+            logger.info(f"🤖 البوت: {context.bot.id}")
+            
+            if reply_to.from_user.id == context.bot.id:
+                logger.info("✅ الرسالة موجهة للبوت!")
+                if chat_id in bot_messages:
+                    if reply_to.message_id in bot_messages[chat_id]:
+                        is_reply_to_bot = True
+                        logger.info("✅ الرسالة معروفة للبوت!")
+                    else:
+                        logger.info("❌ الرسالة غير معروفة للبوت")
+                else:
+                    logger.info("❌ لا توجد رسائل محفوظة للبوت في هذه المجموعة")
         
         # التحقق إذا كان مناداة مباشرة
         is_mention = False
         mention_keywords = ["قمر", "@userhak_bot"]
         if any(keyword in user_message.lower() for keyword in mention_keywords):
             is_mention = True
+            logger.info("✅ تم التعرف على مناداة مباشرة!")
         
         # إذا كان رداً على البوت أو مناداة مباشرة
         if is_reply_to_bot or is_mention:
-            logger.info(f"✅ تفاعل في المجموعة {chat_id}: {user_message}")
+            logger.info(f"🎯 تفاعل صحيح في المجموعة {chat_id}")
             
             # إظهار "يكتب..." فوراً
             await update.message.chat.send_action(action=ChatAction.TYPING)
@@ -166,6 +192,8 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
                     context
                 )
             )
+        else:
+            logger.info("❌ لا يوجد تفاعل مع البوت")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """بدء البوت في المحادثة الخاصة"""
@@ -250,8 +278,7 @@ def main():
         print(f"🎯 {len(IRAQI_PHRASES)} عبارة عراقية")
         print("⏰ يرسل كل 2-3 دقائق")
         print("💬 يرد على الردود والمناداة (قمر، @userhak_bot)")
-        print("♾️ محادثات مستمرة بدون توقف")
-        print("👥 يدعم عدة أشخاص في نفس الوقت")
+        print("🔍 تسجيل مفصل للأخطاء")
         
         application.run_polling()
         
