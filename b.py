@@ -1,3 +1,5 @@
+# main.py - الكود الرئيسي للبوت مع زر الأوامر
+
 import requests
 import random
 import asyncio
@@ -6,8 +8,10 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ChatAction
 
-# استيراد العبارات من ملف منفصل
+# استيراد الملفات المنفصلة
 from phrases import IRAQI_PHRASES
+from commands import start_command, help_command, start_bot, stop_bot, status_command, set_bot_commands
+from commands import active_groups, group_tasks, bot_messages  # استيراد المتغيرات المشتركة
 
 # تفعيل التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -15,41 +19,6 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
 GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
-
-# تخزين البيانات
-active_groups = {}
-group_tasks = {}
-bot_messages = {}
-
-async def send_group_message(chat_id, context):
-    """إرسال رسالة إلى المجموعة كل 2-3 دقائق"""
-    try:
-        while chat_id in active_groups:
-            # استخدام العبارات من الملف المستقل
-            phrase = random.choice(IRAQI_PHRASES)
-            
-            message = await context.bot.send_message(
-                chat_id=chat_id,
-                text=phrase
-            )
-            
-            # حفظ الرسالة في قائمة آخر رسائل البوت
-            if chat_id not in bot_messages:
-                bot_messages[chat_id] = []
-            
-            bot_messages[chat_id].append(message.message_id)
-            
-            # الاحتفاظ بآخر 10 رسائل فقط
-            if len(bot_messages[chat_id]) > 10:
-                bot_messages[chat_id] = bot_messages[chat_id][-10:]
-            
-            logger.info(f"📤 تم إرسال رسالة إلى المجموعة {chat_id}: {phrase}")
-            
-            # انتظر 2-3 دقائق عشوائياً
-            await asyncio.sleep(random.randint(120, 180))
-            
-    except Exception as e:
-        logger.error(f"❌ خطأ في إرسال الرسالة: {e}")
 
 async def handle_ai_response(user_message, reply_to_message_id, chat_id, context):
     """معالجة الرد من الذكاء الاصطناعي"""
@@ -114,8 +83,6 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_message = update.message.text
     chat_id = update.message.chat.id
     
-    logger.info(f"📩 رسالة مستلمة في {chat_id}: {user_message}")
-    
     # إذا كانت محادثة خاصة
     if update.message.chat.type == "private":
         await update.message.chat.send_action(action=ChatAction.TYPING)
@@ -147,27 +114,29 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.message.chat.type in ["group", "supergroup"]:
         reply_to = update.message.reply_to_message
         
+        # ✅ تسجيل تفصيلي للتحقق من المشكلة
         logger.info(f"🔍 التحقق من الرسالة في المجموعة {chat_id}")
         logger.info(f"📝 الرسالة: {user_message}")
-        logger.info(f"🔄 reply_to: {reply_to}")
+        
+        if reply_to:
+            logger.info(f"🔄 reply_to ID: {reply_to.message_id}")
+            logger.info(f"👤 مرسل الرسالة الأصلية: {reply_to.from_user.id if reply_to.from_user else 'None'}")
+            logger.info(f"🤖 البوت: {context.bot.id}")
+        
         logger.info(f"📋 bot_messages: {bot_messages.get(chat_id, [])}")
         
         # التحقق إذا كان رداً على أي رسالة للبوت
         is_reply_to_bot = False
-        if reply_to and reply_to.from_user:
-            logger.info(f"👤 مرسل الرسالة الأصلية: {reply_to.from_user.id}")
-            logger.info(f"🤖 البوت: {context.bot.id}")
-            
-            if reply_to.from_user.id == context.bot.id:
-                logger.info("✅ الرسالة موجهة للبوت!")
-                if chat_id in bot_messages:
-                    if reply_to.message_id in bot_messages[chat_id]:
-                        is_reply_to_bot = True
-                        logger.info("✅ الرسالة معروفة للبوت!")
-                    else:
-                        logger.info("❌ الرسالة غير معروفة للبوت")
+        if reply_to and reply_to.from_user and reply_to.from_user.id == context.bot.id:
+            logger.info("✅ الرسالة موجهة للبوت!")
+            if chat_id in bot_messages:
+                if reply_to.message_id in bot_messages[chat_id]:
+                    is_reply_to_bot = True
+                    logger.info("✅ الرسالة معروفة للبوت!")
                 else:
-                    logger.info("❌ لا توجد رسائل محفوظة للبوت في هذه المجموعة")
+                    logger.info(f"❌ الرسالة {reply_to.message_id} غير موجودة في {bot_messages[chat_id]}")
+            else:
+                logger.info("❌ لا توجد رسائل محفوظة للبوت في هذه المجموعة")
         
         # التحقق إذا كان مناداة مباشرة
         is_mention = False
@@ -195,90 +164,35 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
         else:
             logger.info("❌ لا يوجد تفاعل مع البوت")
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """بدء البوت في المحادثة الخاصة"""
-    await update.message.reply_text(
-        "🤖 **أهلاً! أنا البوت قمر**\n\n"
-        "لتفعيل البوت في مجموعة:\n"
-        "1. أضفني للمجموعة\n"
-        "2. اكتب في المجموعة: /startbot\n\n"
-        "سأرسل رسالة كل 2-3 دقائق وسأرد على الأعضاء! 🚀"
-    )
-
-async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """تشغيل البوت في المجموعة"""
-    chat_id = update.message.chat.id
-    
-    try:
-        # إيقاف أي مهمة سابقة
-        if chat_id in group_tasks:
-            group_tasks[chat_id].cancel()
-        
-        # تفعيل المجموعة
-        active_groups[chat_id] = True
-        bot_messages[chat_id] = []
-        
-        # إرسال أول رسالة فوراً
-        phrase = random.choice(IRAQI_PHRASES)
-        message = await context.bot.send_message(
-            chat_id=chat_id,
-            text=phrase
-        )
-        bot_messages[chat_id].append(message.message_id)
-        
-        # بدء المهمة التلقائية
-        task = asyncio.create_task(send_group_message(chat_id, context))
-        group_tasks[chat_id] = task
-        
-        await update.message.reply_text(
-            "✅ **تم تفعيل البوت قمر!**\n\n"
-            "سأرسل رسالة كل 2-3 دقائق وسأرد على أي رد أو مناداة! 🤖\n"
-            "لإيقاف البوت: /stopbot"
-        )
-        logger.info(f"🚀 تم تفعيل البوت في المجموعة {chat_id}")
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في تفعيل البوت: {e}")
-        await update.message.reply_text(f"❌ حدث خطأ: {str(e)}")
-
-async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """إيقاف البوت في المجموعة"""
-    chat_id = update.message.chat.id
-    
-    try:
-        # إيقاف المهمة
-        if chat_id in group_tasks:
-            group_tasks[chat_id].cancel()
-            del group_tasks[chat_id]
-        
-        if chat_id in active_groups:
-            del active_groups[chat_id]
-        
-        if chat_id in bot_messages:
-            del bot_messages[chat_id]
-        
-        await update.message.reply_text("⏹️ **تم إيقاف البوت قمر!**")
-        logger.info(f"⏹️ تم إيقاف البوت في المجموعة {chat_id}")
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في إيقاف البوت: {e}")
-        await update.message.reply_text("❌ حدث خطأ في إيقاف البوت")
+async def post_init(application):
+    """تهيئة البوت بعد التشغيل"""
+    await set_bot_commands(application)
 
 def main():
     try:
         application = Application.builder().token(TELEGRAM_TOKEN).build()
         
+        # إضافة معالجات الأوامر
         application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("startbot", start_bot))
         application.add_handler(CommandHandler("stopbot", stop_bot))
+        application.add_handler(CommandHandler("status", status_command))
+        
+        # إضافة معالج الرسائل العادية
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_messages))
         
+        # تهيئة زر الأوامر بعد التشغيل
+        application.post_init = post_init
+        
         logger.info("🚀 البوت قمر يعمل...")
-        print("✅ البوت قمر جاهز! الميزات:")
-        print(f"🎯 {len(IRAQI_PHRASES)} عبارة عراقية")
-        print("⏰ يرسل كل 2-3 دقائق")
-        print("💬 يرد على الردود والمناداة (قمر، @userhak_bot)")
-        print("🔍 تسجيل مفصل للأخطاء")
+        print("🤖 **البوت قمر جاهز للعمل!**")
+        print("🎯 **الميزات الجديدة:**")
+        print("   • 🔘 زر الأوامر في واجهة المستخدم")
+        print("   • 📝 أوامر مسجلة للوصول السريع")
+        print("   • 🎯 إصلاح مشكلة حفظ الرسائل")
+        print("   • 📊 تسجيل مفصل للأخطاء")
+        print("💬 **الأوامر المتاحة:** /start, /help, /startbot, /stopbot, /status")
         
         application.run_polling()
         
