@@ -2,8 +2,8 @@ import requests
 import random
 import asyncio
 import logging
-from telegram import Update, BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.constants import ChatAction
 
 # استيراد الملفات
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 active_groups = {}
 group_tasks = {}
 bot_messages = {}
+user_status = {}  # تخزين حالة المستخدمين
 
 async def set_bot_commands(application):
     """تعيين أوامر البوت في القائمة"""
@@ -31,14 +32,68 @@ async def set_bot_commands(application):
     ]
     await application.bot.set_my_commands(commands)
 
-async def is_user_member(user_id, context):
-    """التحقق من اشتراك المستخدم في القناة"""
+async def check_subscription(user_id, context):
+    """التحقق من اشتراك المستخدم في القناة والمجموعة"""
     try:
-        member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-        return member.status in ['member', 'administrator', 'creator']
+        # التحقق من القناة
+        channel_member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        channel_subscribed = channel_member.status in ['member', 'administrator', 'creator']
+        
+        # التحقق من المجموعة (نحاول، إذا فشل نعتبره غير مشترك)
+        group_subscribed = False
+        try:
+            group_member = await context.bot.get_chat_member(chat_id=GROUP_LINK, user_id=user_id)
+            group_subscribed = group_member.status in ['member', 'administrator', 'creator']
+        except:
+            group_subscribed = False
+        
+        return channel_subscribed, group_subscribed
+        
     except Exception as e:
         logger.error(f"❌ خطأ في التحقق من الاشتراك: {e}")
-        return False
+        return False, False
+
+async def subscription_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالجة زر التحقق من الاشتراك"""
+    query = update.callback_query
+    user_id = query.from_user.id
+    
+    await query.answer()
+    
+    # التحقق من الاشتراك
+    channel_subscribed, group_subscribed = await check_subscription(user_id, context)
+    
+    if channel_subscribed and group_subscribed:
+        # إذا مشترك في كليهما
+        user_status[user_id] = True
+        await query.edit_message_text(
+            f"✅ تم التحقق بنجاح!\n"
+            f"شكراً للاشتراك في قناتنا ومجموعتنا\n\n"
+            f"💫 كيف يمكنني مساعدتك اليوم؟\n\n"
+            f"📞 المطور: {OWNER_USERNAME}"
+        )
+    else:
+        # إذا غير مشترك في أحدهما أو كليهما
+        missing = []
+        if not channel_subscribed:
+            missing.append(f"القناة: {CHANNEL_LINK}")
+        if not group_subscribed:
+            missing.append(f"المجموعة: {GROUP_LINK}")
+        
+        missing_text = "\n".join(missing)
+        
+        # إعادة إنشاء زر التحقق
+        keyboard = [
+            [InlineKeyboardButton("🔍 تحقق مرة أخرى", callback_data="check_subscription")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"❌ لم يتم التحقق من الاشتراك\n\n"
+            f"يجب الاشتراك في:\n{missing_text}\n\n"
+            f"بعد الاشتراك، اضغط على زر التحقق:",
+            reply_markup=reply_markup
+        )
 
 def get_local_answer(user_message):
     """البحث في الإجابات المحلية أولاً"""
@@ -150,14 +205,18 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # إذا كانت محادثة خاصة
     if update.message.chat.type == "private":
-        # التحقق من الاشتراك أولاً
-        is_member = await is_user_member(user_id, context)
-        
-        if not is_member:
+        # التحقق إذا كان المستخدم مفعل
+        if user_id not in user_status or not user_status[user_id]:
+            # إنشاء زر التحقق
+            keyboard = [
+                [InlineKeyboardButton("🔍 تحقق من الاشتراك", callback_data="check_subscription")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await update.message.reply_text(
-                f"❗️ عذراً، يجب الاشتراك في قناتنا أولاً:\n"
-                f"{CHANNEL_LINK}\n"
-                f"بعد الاشتراك أرسل /start مرة أخرى"
+                f"❗️ يجب التحقق من الاشتراك أولاً\n\n"
+                f"اضغط على الزر أدناه للتحقق:",
+                reply_markup=reply_markup
             )
             return
         
@@ -206,33 +265,24 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
             asyncio.create_task(handle_ai_response(user_message, update.message.message_id, chat_id, context))
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """بدء البوت مع التحقق من الاشتراك"""
+    """بدء البوت مع زر التحقق"""
     user_id = update.message.from_user.id
-    chat_id = update.message.chat.id
     
     # إذا كانت محادثة خاصة
     if update.message.chat.type == "private":
-        # التحقق من الاشتراك
-        is_member = await is_user_member(user_id, context)
+        # إنشاء زر التحقق
+        keyboard = [
+            [InlineKeyboardButton("🔍 تحقق من الاشتراك", callback_data="check_subscription")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
-        if not is_member:
-            await update.message.reply_text(
-                f"❗️ عذراً، يجب الاشتراك في قناتنا أولاً:\n"
-                f"{CHANNEL_LINK}\n"
-                f"بعد الاشتراك أرسل /start مرة أخرى"
-            )
-            return
-        
-        # إذا كان مشترك - ترحيب
         await update.message.reply_text(
-            f"أهلاً وسهلاً! 🌸\n"
-            f"شكراً للاشتراك بقناتنا {CHANNEL_USERNAME}\n"
-            f"يمكنك استخدام البوت الآن\n\n"
-            f"💫 معلومات البوت:\n"
-            f"- الاسم: {BOT_NAME}\n"
-            f"- المطور: {OWNER_USERNAME}\n"
-            f"- المجموعة: {GROUP_LINK}\n"
-            f"- القناة: {CHANNEL_LINK}"
+            f"أهلاً بك! 👋\n"
+            f"لاستخدام البوت، يجب الاشتراك في:\n"
+            f"📢 القناة: {CHANNEL_USERNAME}\n"
+            f"👥 المجموعة: {GROUP_LINK}\n\n"
+            f"بعد الاشتراك، اضغط على زر التحقق:",
+            reply_markup=reply_markup
         )
     else:
         # في المجموعات - استخدام الأمر العادي
@@ -303,8 +353,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"- اكتب /startbot لتشغيل البوت\n"
         f"- ناديه بـ 'قمر' أو رد على رسائله\n\n"
         f"💫 في المحادثة الخاصة:\n"
-        f"- يجب الاشتراك في {CHANNEL_USERNAME} أولاً\n"
-        f"- ثم أرسل /start لبدء المحادثة\n\n"
+        f"- اضغط /start ثم 'تحقق من الاشتراك'\n"
+        f"- بعد التحقق يمكنك المحادثة\n\n"
         f"📞 المطور: {OWNER_USERNAME}"
     )
 
@@ -342,13 +392,14 @@ def main():
         application.add_handler(CommandHandler("stopbot", stop_bot))
         application.add_handler(CommandHandler("status", status_command))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_messages))
+        application.add_handler(CallbackQueryHandler(subscription_callback, pattern="check_subscription"))
         
         # تعيين الأوامر
         application.post_init = lambda app: set_bot_commands(app)
         
         logger.info("🚀 البوت قمر يعمل...")
         logger.info(f"💾 النظام المحلي جاهز: {len(SIMPLE_QA)} سؤال")
-        logger.info(f"🔒 نظام الاشتراك مفعل للقناة: {CHANNEL_USERNAME}")
+        logger.info(f"🔒 نظام الاشتراك مفعل")
         
         application.run_polling()
         
