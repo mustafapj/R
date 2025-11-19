@@ -8,7 +8,7 @@ from telegram.constants import ChatAction
 
 # استيراد الملفات
 from phrases import IRAQI_PHRASES
-from simple_qa import SIMPLE_QA, GENERAL_QUESTIONS  # الملف الجديد
+from simple_qa import SIMPLE_QA
 
 # تفعيل التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +21,6 @@ GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
 active_groups = {}
 group_tasks = {}
 bot_messages = {}
-user_last_message = {}  # تخزين آخر رسالة لكل مستخدم
 
 async def set_bot_commands(application):
     """تعيين أوامر البوت في القائمة"""
@@ -34,47 +33,26 @@ async def set_bot_commands(application):
     ]
     await application.bot.set_my_commands(commands)
 
-def get_local_answer(user_message, user_id):
+def get_local_answer(user_message):
     """البحث في الإجابات المحلية أولاً"""
     user_message = user_message.strip().lower()
     
-    # البحث المباشر في الأسئلة
+    # فقط إذا السؤال موجود في القائمة → إرجاع الإجابة
     if user_message in SIMPLE_QA:
-        user_last_message[user_id] = user_message
         return SIMPLE_QA[user_message]
     
-    # إذا كان رد على الإجابة السابقة
-    if user_id in user_last_message:
-        last_msg = user_last_message[user_id]
-        if last_msg in SIMPLE_QA:
-            previous_answer = SIMPLE_QA[last_msg]
-            if user_message == previous_answer.lower():
-                user_last_message[user_id] = user_message
-                # إرجاع إجابة إضافية إذا موجودة
-                if previous_answer in SIMPLE_QA:
-                    return SIMPLE_QA[previous_answer]
-    
-    # التحقق إذا كان سؤال عام يحتاج AI
-    for word in GENERAL_QUESTIONS:
-        if word in user_message:
-            return None
-    
-    return "اسأل 'ش تدرس' أو 'شكد عمرج' علشان افهم سؤالك"
+    # أي سؤال آخر → يرجع None لاستخدام الذكاء الاصطناعي
+    return None
 
 async def handle_ai_response(user_message, reply_to_message_id, chat_id, context):
     """معالجة الرد من الذكاء الاصطناعي"""
     try:
-        user_id = f"{chat_id}_{reply_to_message_id}"
-        
         # البحث في الإجابات المحلية أولاً
-        local_answer = get_local_answer(user_message, user_id)
+        local_answer = get_local_answer(user_message)
         
-        if local_answer and local_answer != "اسأل 'ش تدرس' أو 'شكد عمرج' علشان افهم سؤالك":
+        if local_answer:
             ai_response = local_answer
             logger.info(f"✅ استخدام الإجابة المحلية: {ai_response}")
-        elif local_answer and "اسأل" in local_answer:
-            ai_response = local_answer
-            logger.info(f"✅ توجيه لسؤال أفضل: {ai_response}")
         else:
             # استخدام Gemini AI فقط إذا لم توجد إجابة محلية
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
@@ -167,12 +145,9 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.chat.send_action(action=ChatAction.TYPING)
         
         try:
-            user_id = f"{chat_id}_{update.message.message_id}"
-            local_answer = get_local_answer(user_message, user_id)
+            local_answer = get_local_answer(user_message)
             
-            if local_answer and local_answer != "اسأل 'ش تدرس' أو 'شكد عمرج' علشان افهم سؤالك":
-                ai_response = local_answer
-            elif local_answer and "اسأل" in local_answer:
+            if local_answer:
                 ai_response = local_answer
             else:
                 # استخدام Gemini AI
