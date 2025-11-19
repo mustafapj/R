@@ -96,8 +96,8 @@ async def start_bot_in_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # إضافة وظيفة إرسال الرسائل التلقائية
     context.job_queue.run_repeating(
         send_auto_message,
-        interval=60,  # كل 60 ثانية (دقيقة)
-        first=10,     # بعد 10 ثواني من التشغيل
+        interval=3,  # كل 60 ثانية (دقيقة)
+        first=1,     # بعد 10 ثواني من التشغيل
         chat_id=chat_id,
         name=str(chat_id)
     )
