@@ -15,83 +15,11 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
 GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
-ADMIN_USERNAME = "@pw19k"
 
 # تخزين البيانات
 active_groups = {}
 group_tasks = {}
 current_phrases = {}
-admin_chat_id = None
-
-async def send_to_admin(context, message):
-    """إرسال رسالة إلى الأدمن"""
-    global admin_chat_id
-    
-    try:
-        if admin_chat_id is None:
-            # محاولة الحصول على chat_id من خلال إرسال رسالة
-            sent_message = await context.bot.send_message(
-                chat_id=ADMIN_USERNAME,
-                text="🔔 البوت يعمل الآن وجاهز لاستقبال التقارير!"
-            )
-            admin_chat_id = sent_message.chat_id
-            logger.info(f"✅ تم تحديد chat_id للأدمن: {admin_chat_id}")
-        else:
-            await context.bot.send_message(
-                chat_id=admin_chat_id,
-                text=message
-            )
-            logger.info(f"📤 تم إرسال رسالة إلى الأدمن")
-            
-    except Exception as e:
-        logger.error(f"❌ خطأ في إرسال للأدمن: {e}")
-        # إذا فشل الإرسال، نعرض الرسالة في الترمكس بدلاً من ذلك
-        print(f"📝 [رسالة للأدمن]: {message}")
-
-async def get_group_info(chat_id, context):
-    """الحصول على معلومات المجموعة"""
-    try:
-        chat = await context.bot.get_chat(chat_id)
-        members_count = await context.bot.get_chat_members_count(chat_id)
-        
-        info_message = f"""
-📊 **معلومات مجموعة جديدة:**
-
-🏷️ **اسم المجموعة:** {chat.title}
-👥 **عدد الأعضاء:** {members_count}
-🆔 **معرف المجموعة:** {chat_id}
-📅 **تم الإنشاء:** {chat.date.strftime('%Y-%m-%d %H:%M') if chat.date else 'غير معروف'}
-        """
-        
-        await send_to_admin(context, info_message)
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في جلب معلومات المجموعة: {e}")
-        error_msg = f"❌ خطأ في جلب معلومات المجموعة {chat_id}: {e}"
-        await send_to_admin(context, error_msg)
-
-async def log_user_info(update, context):
-    """تسجيل معلومات المستخدم"""
-    try:
-        user = update.message.from_user
-        user_name = f"{user.first_name} {user.last_name or ''}".strip()
-        username = f"@{user.username}" if user.username else "لا يوجد يوزر"
-        chat_type = "خاص" if update.message.chat.type == "private" else "مجموعة"
-        
-        user_message = f"""
-👤 **مستخدم جديد:**
-
-📛 **الاسم:** {user_name}
-🎯 **اليوزر:** {username}
-🆔 **الآيدي:** {user.id}
-💬 **نوع المحادثة:** {chat_type}
-📝 **الرسالة:** {update.message.text[:100]}{'...' if len(update.message.text) > 100 else ''}
-        """
-        
-        await send_to_admin(context, user_message)
-        
-    except Exception as e:
-        logger.error(f"❌ خطأ في تسجيل معلومات المستخدم: {e}")
 
 async def send_group_message(chat_id, context):
     """إرسال رسالة إلى المجموعة كل 3 دقائق"""
@@ -119,9 +47,6 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if not update.message or not update.message.text:
         return
-    
-    # تسجيل معلومات المستخدم
-    await log_user_info(update, context)
     
     # إذا كانت محادثة خاصة
     if update.message.chat.type == "private":
@@ -172,7 +97,7 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
             chat_id in active_groups and
             reply_to.message_id == active_groups[chat_id]):
             
-            logger.info(f"✅ تم التعرف على رد صحيح في المجموعة")
+            logger.info(f"✅ تم التعرف على رد صحيح في المجموعة: {user_message}")
             
             await update.message.chat.send_action(action=ChatAction.TYPING)
             
@@ -184,8 +109,10 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
                 response = requests.post(
                     url,
                     json={"contents": [{"parts": [{"text": prompt}]}]},
-                    timeout=10
+                    timeout=15
                 )
+                
+                logger.info(f"🔍 حالة الرد من API: {response.status_code}")
                 
                 if response.status_code == 200:
                     result = response.json()
@@ -198,6 +125,8 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
                     else:
                         ai_response = full_response
                     
+                    logger.info(f"📝 الرد النهائي: {ai_response}")
+                    
                     # إرسال الرد بدون ذكر الاسم
                     await context.bot.send_message(
                         chat_id=chat_id,
@@ -207,28 +136,25 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
                     logger.info(f"✅ تم الرد في المجموعة")
                     
                 else:
+                    error_msg = f"❌ خطأ API: {response.status_code} - {response.text}"
+                    logger.error(error_msg)
                     await context.bot.send_message(
                         chat_id=chat_id,
-                        text="❌ معليش، ما قدرت أرد هسه",
+                        text="😊 آسف، حاول مرة ثانية",
                         reply_to_message_id=update.message.message_id
                     )
                     
             except Exception as e:
+                error_msg = f"❌ خطأ في الاتصال: {e}"
+                logger.error(error_msg)
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text="❌ معليش، ما قدرت أرد هسه",
+                    text="😊 آسف، حاول مرة ثانية",
                     reply_to_message_id=update.message.message_id
                 )
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """بدء البوت في المحادثة الخاصة"""
-    global admin_chat_id
-    
-    # تعيين الأدمن عند أول تفاعل
-    if admin_chat_id is None:
-        admin_chat_id = update.message.chat_id
-        await send_to_admin(context, "✅ تم ربط البوت مع الأدمن بنجاح!")
-    
     await update.message.reply_text(
         "🤖 **أهلاً! أنا البوت المساعد**\n\n"
         "لتفعيل البوت في مجموعة:\n"
@@ -248,9 +174,6 @@ async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # تفعيل المجموعة
         active_groups[chat_id] = None
-        
-        # إرسال معلومات المجموعة إلى الأدمن
-        await get_group_info(chat_id, context)
         
         # إرسال أول رسالة فوراً
         current_phrases[chat_id] = random.choice(IRAQI_PHRASES)
@@ -311,7 +234,6 @@ def main():
         print("✅ البوت جاهز! الميزات:")
         print(f"🎯 {len(IRAQI_PHRASES)} عبارة عراقية - تتغير كل 3 دقائق")
         print("⚡ ردود سريعة بدون أسماء")
-        print("📊 إرسال معلومات المجموعات والمستخدمين إلى @pw19k")
         print("💬 يدعم المحادثات الخاصة والمجموعات")
         
         application.run_polling()
