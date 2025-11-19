@@ -6,7 +6,7 @@ import asyncio
 
 # تفعيل التسجيل
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger.getLogger(__name__)
+logger = logging.getLogger(__name__)  # التصحيح هنا
 
 TELEGRAM_TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
 GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
