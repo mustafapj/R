@@ -9,13 +9,11 @@ from telegram.constants import ChatAction
 # استيراد الملفات
 from phrases import IRAQI_PHRASES
 from simple_qa import SIMPLE_QA
+from config import TELEGRAM_TOKEN, GEMINI_API_KEY, CHANNEL_USERNAME, GROUP_LINK, CHANNEL_LINK, OWNER_USERNAME, BOT_NAME
 
 # تفعيل التسجيل
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-TELEGRAM_TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
-GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
 
 # تخزين البيانات
 active_groups = {}
@@ -32,6 +30,15 @@ async def set_bot_commands(application):
         BotCommand("status", "حالة البوت")
     ]
     await application.bot.set_my_commands(commands)
+
+async def is_user_member(user_id, context):
+    """التحقق من اشتراك المستخدم في القناة"""
+    try:
+        member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        return member.status in ['member', 'administrator', 'creator']
+    except Exception as e:
+        logger.error(f"❌ خطأ في التحقق من الاشتراك: {e}")
+        return False
 
 def get_local_answer(user_message):
     """البحث في الإجابات المحلية أولاً"""
@@ -139,9 +146,21 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     user_message = update.message.text
     chat_id = update.message.chat.id
+    user_id = update.message.from_user.id
     
     # إذا كانت محادثة خاصة
     if update.message.chat.type == "private":
+        # التحقق من الاشتراك أولاً
+        is_member = await is_user_member(user_id, context)
+        
+        if not is_member:
+            await update.message.reply_text(
+                f"❗️ عذراً، يجب الاشتراك في قناتنا أولاً:\n"
+                f"{CHANNEL_LINK}\n"
+                f"بعد الاشتراك أرسل /start مرة أخرى"
+            )
+            return
+        
         await update.message.chat.send_action(action=ChatAction.TYPING)
         
         try:
@@ -185,6 +204,39 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
         if is_reply_to_bot or is_mention:
             await update.message.chat.send_action(action=ChatAction.TYPING)
             asyncio.create_task(handle_ai_response(user_message, update.message.message_id, chat_id, context))
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """بدء البوت مع التحقق من الاشتراك"""
+    user_id = update.message.from_user.id
+    chat_id = update.message.chat.id
+    
+    # إذا كانت محادثة خاصة
+    if update.message.chat.type == "private":
+        # التحقق من الاشتراك
+        is_member = await is_user_member(user_id, context)
+        
+        if not is_member:
+            await update.message.reply_text(
+                f"❗️ عذراً، يجب الاشتراك في قناتنا أولاً:\n"
+                f"{CHANNEL_LINK}\n"
+                f"بعد الاشتراك أرسل /start مرة أخرى"
+            )
+            return
+        
+        # إذا كان مشترك - ترحيب
+        await update.message.reply_text(
+            f"أهلاً وسهلاً! 🌸\n"
+            f"شكراً للاشتراك بقناتنا {CHANNEL_USERNAME}\n"
+            f"يمكنك استخدام البوت الآن\n\n"
+            f"💫 معلومات البوت:\n"
+            f"- الاسم: {BOT_NAME}\n"
+            f"- المطور: {OWNER_USERNAME}\n"
+            f"- المجموعة: {GROUP_LINK}\n"
+            f"- القناة: {CHANNEL_LINK}"
+        )
+    else:
+        # في المجموعات - استخدام الأمر العادي
+        await start_bot(update, context)
 
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تشغيل البوت في المجموعة"""
@@ -243,12 +295,26 @@ async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text("❌ حدث خطأ")
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """مساعدة"""
+    await update.message.reply_text(
+        f"🆘 كيفية استخدام البوت:\n\n"
+        f"💫 في المجموعات:\n"
+        f"- اكتب /startbot لتشغيل البوت\n"
+        f"- ناديه بـ 'قمر' أو رد على رسائله\n\n"
+        f"💫 في المحادثة الخاصة:\n"
+        f"- يجب الاشتراك في {CHANNEL_USERNAME} أولاً\n"
+        f"- ثم أرسل /start لبدء المحادثة\n\n"
+        f"📞 المطور: {OWNER_USERNAME}"
+    )
+
 def main():
     try:
         application = Application.builder().token(TELEGRAM_TOKEN).build()
         
         # إضافة المعالجات
-        application.add_handler(CommandHandler("start", start_bot))
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("startbot", start_bot))
         application.add_handler(CommandHandler("stopbot", stop_bot))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_messages))
@@ -258,6 +324,7 @@ def main():
         
         logger.info("🚀 البوت قمر يعمل...")
         logger.info(f"💾 النظام المحلي جاهز: {len(SIMPLE_QA)} سؤال")
+        logger.info(f"🔒 نظام الاشتراك مفعل للقناة: {CHANNEL_USERNAME}")
         
         application.run_polling()
         
