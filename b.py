@@ -1,245 +1,119 @@
-import telebot
-import time
-import threading
-import socket
-import socks
+import os
+import requests
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from dotenv import load_dotenv
 
-# إعداد Tor
-socks.set_default_proxy(socks.SOCKS5, "127.0.0.1", 9050)
-socket.socket = socks.socksocket
+# تحميل المتغيرات من ملف .env
+load_dotenv()
 
-TOKEN = "8520375677:AAGcmKBcCOKsaLcHPHvbiBjSP-rmRU48cOY"
-bot = telebot.TeleBot(TOKEN)
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
-class ArayBot:
-    def __init__(self):
-        self.is_active = False
-        self.words = [
-  "مرحبا",
-  "هلا بيكم",
-  "شلونكم حبايبي",
-  "شلونك انت",
-  "السلام عليكم",
-  "هلا شنو الأخبار",
-  "منو يساعدني لو سمحتوا",
-  "أحتاج مساعدة ضروري",
-  "ممكن أحد يفيدني",
-  "أحد يجاوبني لو سمحتوا",
-  "أريد أسأل سؤال",
-  "أريد تبويت إذا ممكن",
-  "أحتاج دعم بسيط",
-  "تكدرون تساعدوني",
-  "مليت اليوم",
-  "كلش ضوجة",
-  "حاسّة ملل",
-  "مخنوقة شوي",
-  "ضايجة كلش",
-  "طفشانة",
-  "زهقانة",
-  "تعبانة نفسياً",
-  "حاسّة إحباط",
-  "دوخة خلق",
-  "ما عندي خلق لشي",
-  "ضايج خلقي",
-  "واحدة تحجي وياي",
-  "أريد أحد يونسني",
-  "أريد سوالف",
-  "فد وحدة فاضية",
-  "أنطوني رأيكم",
-  "منو موجود",
-  "هلا شكو ماكو",
-  "أريد أحجي ويا أحد",
-  "أحتاج نصيحة",
-  "منو عنده خبرة يفيدني",
-  "أحد يرد عليّ",
-  "سؤال بسيط بس محتارة",
-  "تكدرون تجاوبوني",
-  "أريد معلومات عن شي",
-  "محتاجة احد يفهمني",
-  "حاسّة ما مرتاحة",
-  "مزاجي صفر",
-  "والله ضجت",
-  "صارلي ساعة مليت",
-  "أريد أغير جو",
-  "فد شي يونس",
-  "ما أعرف شسوي",
-  "أريد أشغل نفسي بشي",
-  "أريد واحده تنصحني",
-  "أريد أسولف",
-  "ويني البنات",
-  "منو فاضية تحجي وياي",
-  "أريد أفضفض",
-  "دا أمل بصراحة",
-  "أريد أحد يسمعني",
-  "حاسّة بوحدة",
-  "مقروبة اليوم",
-  "هواي ضغط",
-  "محتاجتكم",
-  "ساعدوني إذا تكدرون",
-  "شنو تنصحوني أسوي",
-  "أحد ينطيني حل",
-  "حاسة وقتي ضايع",
-  "اليوم مو يومي",
-  "مزاجي مو زين",
-  "تلعب نفسي أطلع",
-  "أريد أسولف من ضوجتي",
-  "أريد أتفاهم ويا أحد",
-  "بنات شنو رأيكم",
-  "أريد رأي صريح",
-  "أريد مشاركة بسيطة",
-  "تعالوا نسولف",
-  "أحد يقترحلي شي",
-  "أريد موضوع نحجي بيه",
-  "كلش محتارة",
-  "أريد أفضفض شوي",
-  "حاسّة نفسي مضغوطة",
-  "أريد أرتاح نفسياً",
-  "أحتاج كلام حلو",
-  "أريد تشجيع",
-  "حاسّة أني ضايعة",
-  "أريد أركز بس ما أكدر",
-  "مخي مزدود",
-  "أريد أحد يفهم شعوري",
-  "حاسّة إني محتاجة أحد يحجي وياي",
-  "أريد تهوين",
-  "أريد أحد يعطيني دفعة",
-  "اليوم ثقيل كلش",
-  "فاقدة حماس",
-  "أريد كلمتين بس تريحني",
-  "حاسة مو بكَيفي",
-  "أريد أتونس وياكم",
-  "هلا بيكم شنو السالفة",
-  "أريد أحجي شوي",
-  "أريد أحد يفهمني بسرعه",
-  "صارلي ضايجة من الصبح",
-  "أريد شي يغير مزاجي",
-  "محتاجة وجودكم"
-]
-        self.current_index = 0
-        self.group_chat_id = None
-        
-    def start_sending(self, group_chat_id):
-        """بدء إرسال الكلمات في المجموعة"""
-        if self.is_active:
-            return "⏳ البوت يعمل بالفعل!"
-        
-        self.is_active = True
-        self.group_chat_id = group_chat_id
-        self.current_index = 0
-        
-        # إرسال رسالة البدء في المجموعة
-        try:
-            bot.send_message(group_chat_id, "🚀 بدأ البوت")
-        except Exception as e:
-            print(f"خطأ في الإرسال: {e}")
-        
-        # بدء الإرسال في thread منفصل
-        thread = threading.Thread(target=self._sending_loop)
-        thread.daemon = True
-        thread.start()
-        
-        return "بدأ البوت العمل 🚀"
+# إعدادات Tor Proxy
+TOR_PROXIES = {
+    'http': 'socks5h://127.0.0.1:9050',
+    'https': 'socks5h://127.0.0.1:9050'
+}
+
+# دالة للتحقق من عمل Tor
+def check_tor_connection():
+    try:
+        response = requests.get('http://check.torproject.org/', proxies=TOR_PROXIES, timeout=30)
+        return "Congratulations" in response.text
+    except:
+        return False
+
+# دالة للتواصل مع DeepSeek API عبر Tor
+async def get_deepseek_response(user_message):
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0"
+    }
     
-    def stop_sending(self, group_chat_id):
-        """إيقاف إرسال الكلمات"""
-        if not self.is_active:
-            return "البوت متوقف بالفعل!"
-        
-        self.is_active = False
-        try:
-            bot.send_message(group_chat_id, "⏹️ توقف البوت")
-        except Exception as e:
-            print(f"خطأ في الإرسال: {e}")
-        return " وصلت حبي سكتنه😗"
-    
-    def _sending_loop(self):
-        """حلقة الإرسال الرئيسية في المجموعة"""
-        while self.is_active:
-            try:
-                # الحصول على الكلمة الحالية
-                word = self.words[self.current_index]
-                
-                # إرسال الكلمة في المجموعة بدون أي إضافات
-                bot.send_message(self.group_chat_id, word)
-                print(f"✅ تم إرسال في المجموعة: {word}")
-                
-                # الانتقال للكلمة التالية
-                self.current_index = (self.current_index + 1) % len(self.words)
-                
-                # انتظار 15 ثانية
-                for i in range(60):
-                    if not self.is_active:
-                        break
-                    time.sleep(1)
-                    
-            except Exception as e:
-                print(f"❌ خطأ في الإرسال: {e}")
-                time.sleep(15)
-
-# كائن البوت
-aray_bot = ArayBot()
-
-@bot.message_handler(commands=['start'])
-def start(message):
-    """رسالة الترحيب"""
-    welcome = """
-🎯 بوت أراي للكلمات
-
-📝 طريقة الاستخدام في المجموعة:
-• اراي٢ - بدء إرسال الكلمات
-• اراي - إوقف البوت
-
-🔄 الوظيفة:
-• يرسل كلمات (كت، نن، ل، غ) في المجموعة
-• كل 15 ثانية كلمة جديدة
-• بدون أي إضافات أو رموز
-"""
-    bot.send_message(message.chat.id, welcome)
-
-@bot.message_handler(func=lambda message: True)
-def handle_all_messages(message):
-    """معالجة جميع الرسائل"""
-    text = message.text.strip()
-    chat_type = message.chat.type
+    data = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "user", "content": user_message}
+        ],
+        "stream": False
+    }
     
     try:
-        if text == "اراي":
-            # بدء البوت في المجموعة
-            if chat_type == "group" or chat_type == "supergroup":
-                result = aray_bot.start_sending(message.chat.id)
-                bot.reply_to(message, result)
-            else:
-                bot.reply_to(message, "⚠️ هذا الأمر يعمل في المجموعات فقط!")
+        # التحقق من اتصال Tor أولاً
+        if not check_tor_connection():
+            return "⚠️ Tor غير نشط. يرجى تشغيل Tor أولاً: `tor &`"
         
-        elif text == "اراي٢":
-            # إيقاف البوت في المجموعة
-            if chat_type == "group" or chat_type == "supergroup":
-                result = aray_bot.stop_sending(message.chat.id)
-                bot.reply_to(message, result)
-            else:
-                bot.reply_to(message, "⚠️ هذا الأمر يعمل في المجموعات فقط!")
+        response = requests.post(
+            DEEPSEEK_API_URL, 
+            headers=headers, 
+            json=data, 
+            proxies=TOR_PROXIES,
+            timeout=60
+        )
+        response.raise_for_status()
         
-        elif chat_type == "private":
-            bot.reply_to(message, "❓ أضف البوت للمجموعة ثم اكتب 'اراي٢'")
-            
+        result = response.json()
+        return result['choices'][0]['message']['content']
+        
+    except requests.exceptions.RequestException as e:
+        return f"⚠️ خطأ في الاتصال: {str(e)}"
     except Exception as e:
-        print(f"❌ خطأ في معالجة الرسالة: {e}")
+        return f"⚠️ حدث خطأ: {str(e)}"
 
-@bot.message_handler(content_types=['new_chat_members'])
-def welcome_new_members(message):
-    """ترحيب بالأعضاء الجدد"""
-    try:
-        for member in message.new_chat_members:
-            if member.is_bot and member.username == bot.get_me().username:
-                welcome_msg = "🎯 بوت أراي للكلمات\n\nاكتب 'اراي٢' لبدء العمل"
-                bot.send_message(message.chat.id, welcome_msg)
-                break
-    except Exception as e:
-        print(f"❌ خطأ في ترحيب الأعضاء: {e}")
+# معالج الرسائل
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    
+    # إظهار رسالة "يكتب..."
+    await update.message.chat.send_action(action="typing")
+    
+    # الحصول على الرد من DeepSeek عبر Tor
+    ai_response = await get_deepseek_response(user_message)
+    
+    # إرسال الرد (بتقسيمه إذا كان طويلاً)
+    if len(ai_response) > 4096:
+        for i in range(0, len(ai_response), 4096):
+            await update.message.reply_text(ai_response[i:i+4096])
+    else:
+        await update.message.reply_text(ai_response)
+
+# دالة البدء
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    welcome_text = """
+    🔒 أهلاً بك! أنا بوت مدعوم بـ DeepSeek
+    ⚡ يعمل عبر Tor لحماية الخصوصية
+    
+    فقط اكتب رسالتك وسأرد عليك فوراً!
+    """
+    await update.message.reply_text(welcome_text)
+
+# دالة حالة Tor
+async def tor_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status = "🟢 Tor نشط" if check_tor_connection() else "🔴 Tor غير نشط"
+    await update.message.reply_text(f"حالة Tor: {status}")
+
+# الإعدادات الرئيسية
+def main():
+    # التحقق من تشغيل Tor
+    if not check_tor_connection():
+        print("⚠️ تحذير: Tor غير نشط. تشغيل البوت بدون حماية...")
+    
+    # إنشاء تطبيق البوت
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # إضافة المعالجات
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # الأوامر
+    application.add_handler(MessageHandler(filters.Command("start"), start_command))
+    application.add_handler(MessageHandler(filters.Command("tor"), tor_status))
+    
+    # بدء البوت
+    print("🤖 البوت يعمل الآن مع Tor...")
+    application.run_polling()
 
 if __name__ == "__main__":
-    print("🚀 بدء تشغيل بوت أراي عبر Tor...")
-    try:
-        bot.polling(none_stop=True)
-    except Exception as e:
-        print(f"❌ خطأ في تشغيل البوت: {e}")
+    main()
