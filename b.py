@@ -19,28 +19,84 @@ GEMINI_API_KEY = "AIzaSyDKTY7PaRhgKJI-CdZSnClFTQ_WvC6_KvY"
 # تخزين البيانات
 active_groups = {}
 group_tasks = {}
-current_phrases = {}
+bot_messages = {}  # تخزين آخر 10 رسائل للبوت في كل مجموعة
 
 async def send_group_message(chat_id, context):
-    """إرسال رسالة إلى المجموعة كل 3 دقائق"""
+    """إرسال رسالة إلى المجموعة كل 2-3 دقائق"""
     try:
         while chat_id in active_groups:
             # استخدام العبارات من الملف المستقل
-            current_phrases[chat_id] = random.choice(IRAQI_PHRASES)
+            phrase = random.choice(IRAQI_PHRASES)
             
             message = await context.bot.send_message(
                 chat_id=chat_id,
-                text=current_phrases[chat_id]
+                text=phrase
             )
             
-            active_groups[chat_id] = message.message_id
+            # حفظ الرسالة في قائمة آخر رسائل البوت
+            if chat_id not in bot_messages:
+                bot_messages[chat_id] = []
+            
+            bot_messages[chat_id].append(message.message_id)
+            
+            # الاحتفاظ بآخر 10 رسائل فقط
+            if len(bot_messages[chat_id]) > 10:
+                bot_messages[chat_id] = bot_messages[chat_id][-10:]
+            
             logger.info(f"📤 تم إرسال رسالة إلى المجموعة {chat_id}")
             
-            # انتظر 3 دقائق
-            await asyncio.sleep(180)
+            # انتظر 2-3 دقائق عشوائياً
+            await asyncio.sleep(random.randint(120, 180))
             
     except Exception as e:
         logger.error(f"❌ خطأ في إرسال الرسالة: {e}")
+
+async def handle_ai_response(user_message, reply_to_message_id, chat_id, context):
+    """معالجة الرد من الذكاء الاصطناعي"""
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
+        
+        prompt = f"أجب بإجابة مختصرة جداً (جملة واحدة) باللهجة العراقية: {user_message}"
+        
+        response = requests.post(
+            url,
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            full_response = result['candidates'][0]['content']['parts'][0]['text']
+            
+            # تقصير الرد
+            if len(full_response) > 100:
+                sentences = full_response.split('.')
+                ai_response = '.'.join(sentences[:1]) + '.'
+            else:
+                ai_response = full_response
+            
+            # إرسال الرد
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=ai_response,
+                reply_to_message_id=reply_to_message_id
+            )
+            logger.info(f"✅ تم الرد في المجموعة {chat_id}")
+            
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="😊 آسف، حاول مرة ثانية",
+                reply_to_message_id=reply_to_message_id
+            )
+            
+    except Exception as e:
+        logger.error(f"❌ خطأ في الرد: {e}")
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="😊 آسف، حاول مرة ثانية",
+            reply_to_message_id=reply_to_message_id
+        )
 
 async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة جميع الرسائل"""
@@ -48,16 +104,17 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not update.message or not update.message.text:
         return
     
+    user_message = update.message.text
+    chat_id = update.message.chat.id
+    
     # إذا كانت محادثة خاصة
     if update.message.chat.type == "private":
-        user_message = update.message.text
-        
         await update.message.chat.send_action(action=ChatAction.TYPING)
         
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
             
-            prompt = f"أجب بإجابة مختصرة جداً (جملة واحدة أو اثنتين كحد أقصى) باللهجة العراقية: {user_message}"
+            prompt = f"أجب بإجابة مختصرة باللهجة العراقية: {user_message}"
             
             response = requests.post(
                 url,
@@ -67,14 +124,7 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             if response.status_code == 200:
                 result = response.json()
-                full_response = result['candidates'][0]['content']['parts'][0]['text']
-                
-                # تقصير الرد
-                if len(full_response) > 100:
-                    sentences = full_response.split('.')
-                    ai_response = '.'.join(sentences[:2]) + '.'
-                else:
-                    ai_response = full_response
+                ai_response = result['candidates'][0]['content']['parts'][0]['text']
             else:
                 ai_response = "❌ حدث خطأ"
                 
@@ -86,81 +136,45 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # إذا كانت في مجموعة
     if update.message.chat.type in ["group", "supergroup"]:
-        chat_id = update.message.chat.id
-        user_message = update.message.text
         reply_to = update.message.reply_to_message
         
-        # إذا كان رداً على رسالة البوت
-        if (reply_to and 
-            reply_to.from_user and 
-            reply_to.from_user.id == context.bot.id and
-            chat_id in active_groups and
-            reply_to.message_id == active_groups[chat_id]):
+        # التحقق إذا كان رداً على أي رسالة للبوت
+        is_reply_to_bot = False
+        if reply_to and reply_to.from_user and reply_to.from_user.id == context.bot.id:
+            if chat_id in bot_messages and reply_to.message_id in bot_messages[chat_id]:
+                is_reply_to_bot = True
+        
+        # التحقق إذا كان مناداة مباشرة
+        is_mention = False
+        mention_keywords = ["قمر", "@userhak_bot"]
+        if any(keyword in user_message.lower() for keyword in mention_keywords):
+            is_mention = True
+        
+        # إذا كان رداً على البوت أو مناداة مباشرة
+        if is_reply_to_bot or is_mention:
+            logger.info(f"✅ تفاعل في المجموعة {chat_id}: {user_message}")
             
-            logger.info(f"✅ تم التعرف على رد صحيح في المجموعة: {user_message}")
-            
+            # إظهار "يكتب..." فوراً
             await update.message.chat.send_action(action=ChatAction.TYPING)
             
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key={GEMINI_API_KEY}"
-                
-                prompt = f"أجب بإجابة مختصرة جداً (جملة واحدة) باللهجة العراقية: {user_message}"
-                
-                response = requests.post(
-                    url,
-                    json={"contents": [{"parts": [{"text": prompt}]}]},
-                    timeout=15
+            # معالجة الرد في مهمة منفصلة
+            asyncio.create_task(
+                handle_ai_response(
+                    user_message, 
+                    update.message.message_id, 
+                    chat_id, 
+                    context
                 )
-                
-                logger.info(f"🔍 حالة الرد من API: {response.status_code}")
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    full_response = result['candidates'][0]['content']['parts'][0]['text']
-                    
-                    # تقصير الرد
-                    if len(full_response) > 80:
-                        sentences = full_response.split('.')
-                        ai_response = '.'.join(sentences[:1]) + '.'
-                    else:
-                        ai_response = full_response
-                    
-                    logger.info(f"📝 الرد النهائي: {ai_response}")
-                    
-                    # إرسال الرد بدون ذكر الاسم
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=ai_response,
-                        reply_to_message_id=update.message.message_id
-                    )
-                    logger.info(f"✅ تم الرد في المجموعة")
-                    
-                else:
-                    error_msg = f"❌ خطأ API: {response.status_code} - {response.text}"
-                    logger.error(error_msg)
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text="😊 آسف، حاول مرة ثانية",
-                        reply_to_message_id=update.message.message_id
-                    )
-                    
-            except Exception as e:
-                error_msg = f"❌ خطأ في الاتصال: {e}"
-                logger.error(error_msg)
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text="😊 آسف، حاول مرة ثانية",
-                    reply_to_message_id=update.message.message_id
-                )
+            )
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """بدء البوت في المحادثة الخاصة"""
     await update.message.reply_text(
-        "🤖 **أهلاً! أنا البوت المساعد**\n\n"
+        "🤖 **أهلاً! أنا البوت قمر**\n\n"
         "لتفعيل البوت في مجموعة:\n"
         "1. أضفني للمجموعة\n"
         "2. اكتب في المجموعة: /startbot\n\n"
-        "سأرسل رسالة كل 3 دقائق وسأرد على الأعضاء! 🚀"
+        "سأرسل رسالة كل 2-3 دقائق وسأرد على الأعضاء! 🚀"
     )
 
 async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -173,23 +187,24 @@ async def start_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
             group_tasks[chat_id].cancel()
         
         # تفعيل المجموعة
-        active_groups[chat_id] = None
+        active_groups[chat_id] = True
+        bot_messages[chat_id] = []
         
         # إرسال أول رسالة فوراً
-        current_phrases[chat_id] = random.choice(IRAQI_PHRASES)
+        phrase = random.choice(IRAQI_PHRASES)
         message = await context.bot.send_message(
             chat_id=chat_id,
-            text=current_phrases[chat_id]
+            text=phrase
         )
-        active_groups[chat_id] = message.message_id
+        bot_messages[chat_id].append(message.message_id)
         
         # بدء المهمة التلقائية
         task = asyncio.create_task(send_group_message(chat_id, context))
         group_tasks[chat_id] = task
         
         await update.message.reply_text(
-            "✅ **تم تفعيل البوت!**\n\n"
-            "سأرسل رسالة كل 3 دقائق وسأرد على أي رد من الأعضاء! 🤖\n"
+            "✅ **تم تفعيل البوت قمر!**\n\n"
+            "سأرسل رسالة كل 2-3 دقائق وسأرد على أي رد أو مناداة! 🤖\n"
             "لإيقاف البوت: /stopbot"
         )
         logger.info(f"🚀 تم تفعيل البوت في المجموعة {chat_id}")
@@ -211,10 +226,10 @@ async def stop_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if chat_id in active_groups:
             del active_groups[chat_id]
         
-        if chat_id in current_phrases:
-            del current_phrases[chat_id]
+        if chat_id in bot_messages:
+            del bot_messages[chat_id]
         
-        await update.message.reply_text("⏹️ **تم إيقاف البوت!**")
+        await update.message.reply_text("⏹️ **تم إيقاف البوت قمر!**")
         logger.info(f"⏹️ تم إيقاف البوت في المجموعة {chat_id}")
         
     except Exception as e:
@@ -230,16 +245,18 @@ def main():
         application.add_handler(CommandHandler("stopbot", stop_bot))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_messages))
         
-        logger.info("🚀 البوت يعمل...")
-        print("✅ البوت جاهز! الميزات:")
-        print(f"🎯 {len(IRAQI_PHRASES)} عبارة عراقية - تتغير كل 3 دقائق")
-        print("⚡ ردود سريعة بدون أسماء")
-        print("💬 يدعم المحادثات الخاصة والمجموعات")
+        logger.info("🚀 البوت قمر يعمل...")
+        print("✅ البوت قمر جاهز! الميزات:")
+        print(f"🎯 {len(IRAQI_PHRASES)} عبارة عراقية")
+        print("⏰ يرسل كل 2-3 دقائق")
+        print("💬 يرد على الردود والمناداة (قمر، @userhak_bot)")
+        print("♾️ محادثات مستمرة بدون توقف")
+        print("👥 يدعم عدة أشخاص في نفس الوقت")
         
         application.run_polling()
         
     except Exception as e:
-        logger.error(f"❌ خطأ: {e}")
+        logger.error(f"❌ خطأ في التشغيل: {e}")
 
 if __name__ == "__main__":
     main()
