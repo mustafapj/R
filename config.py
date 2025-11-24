@@ -24,3 +24,7 @@ active_groups = {}
 group_tasks = {}
 bot_messages = {}
 user_status = {}
+# بيانات المطور
+DEVELOPER_ID = 5367866254
+DEVELOPER_USERNAME = "@pw19k"
+DEVELOPER_NAME = "Mustafa"
