@@ -9,7 +9,7 @@ from telegram.constants import ChatAction
 # استيراد الملفات
 from phrases import IRAQI_PHRASES
 from simple_qa import SIMPLE_QA
-from bot_config import *
+from config import *
 
 # تفعيل التسجيل
 logging.basicConfig(level=logging.INFO)
