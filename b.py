@@ -9,7 +9,7 @@ from telegram.constants import ChatAction
 # استيراد الملفات
 from phrases import IRAQI_PHRASES
 from simple_qa import SIMPLE_QA
-from config import *  # ⬅️ تم التغيير هنا
+from config import *
 
 # تفعيل التسجيل
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +26,14 @@ async def set_bot_commands(application):
         BotCommand("status", "حالة البوت")
     ]
     await application.bot.set_my_commands(commands)
+
+def is_developer(user_id):
+    """التحقق إذا كان المستخدم هو المطور"""
+    return user_id == DEVELOPER_ID
+
+def get_developer_info():
+    """معلومات المطور"""
+    return f"👨‍💻 المطور: {DEVELOPER_NAME}\n📞 الحساب: {DEVELOPER_USERNAME}"
 
 async def check_subscription(user_id, context):
     """التحقق من اشتراك المستخدم في القناة فقط"""
@@ -53,13 +61,26 @@ def create_main_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📢 قناتنا", url=CHANNEL_LINK),
          InlineKeyboardButton("👥 مجموعتنا", url=GROUP_LINK)],
-        [InlineKeyboardButton("👨‍💻 المطور", url=f"https://t.me/{OWNER_USERNAME.replace('@', '')}"),
+        [InlineKeyboardButton("👨‍💻 المطور", url=f"https://t.me/{DEVELOPER_USERNAME.replace('@', '')}"),
          InlineKeyboardButton("🔍 تحقق من الاشتراك", callback_data="check_subscription")]
     ])
 
 # ========== معالجات الأوامر ==========
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """بدء البوت"""
+    user_id = update.message.from_user.id
+    
+    # إذا كان المطور
+    if is_developer(user_id):
+        user_status[user_id] = True
+        await update.message.reply_text(
+            f"🎉 أهلاً مطوري العزيز! {DEVELOPER_NAME}\n\n"
+            f"🛠️ نظام المطور مفعل\n"
+            f"⚡ يمكنك استخدام /admin للتحكم\n"
+            f"🔓 أنت معفي من التحقق"
+        )
+        return
+        
     if update.message.chat.type == "private":
         await update.message.reply_text(
             f"أهلاً بك! 👋\nلاستخدام البوت، يجب الاشتراك في قناتنا:\n{CHANNEL_USERNAME}\n\n"
@@ -119,7 +140,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆘 كيفية استخدام البوت:\n\n"
         f"💫 في المجموعات:\n- /startbot لتشغيل البوت\n- ناديه بـ 'قمر'\n\n"
         f"💫 في الخاص:\n- /start ثم التحقق من الاشتراك\n\n"
-        f"📞 المطور: {OWNER_USERNAME}",
+        f"📞 المطور: {DEVELOPER_USERNAME}",
         reply_markup=create_main_keyboard()
     )
 
@@ -148,6 +169,16 @@ async def subscription_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer()
     except:
         pass  # نتجاهل أخطاء answer
+    
+    # إذا كان المطور، لا يحتاج تحقق
+    if is_developer(user_id):
+        user_status[user_id] = True
+        await query.message.reply_text(
+            f"🎉 أهلاً مطوري! {DEVELOPER_NAME}\n"
+            f"🔓 تم التفعيل تلقائياً\n"
+            f"🛠️ يمكنك استخدام /admin"
+        )
+        return
     
     # التحقق من الاشتراك في القناة فقط
     channel_subscribed, _ = await check_subscription(user_id, context)
@@ -224,12 +255,74 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = update.message.chat.id
     user_id = update.message.from_user.id
     
+    # ⬇️ التحقق إذا كان المطور
+    if is_developer(user_id):
+        # رسالة ترحيب خاصة عندما يتكلم المطور لأول مرة
+        if user_id not in user_status:
+            user_status[user_id] = True
+            await update.message.reply_text(
+                f"🎉 أهلاً وسهلاً يا مطوري! {DEVELOPER_NAME}\n\n"
+                f"🛠️ أنت معروف كمطور النظام\n"
+                f"⚡ يمكنك استخدام الأوامر الخاصة\n"
+                f"📊 /admin - للوحة التحكم\n"
+                f"📈 /stats - للإحصائيات"
+            )
+        
+        # أوامر خاصة للمطور
+        if user_message.lower() in ["/admin", "مطور", "ادمن", "لوحة التحكم"]:
+            await update.message.reply_text(
+                f"🛠️ لوحة المطور - {DEVELOPER_NAME}\n\n"
+                f"📊 الإحصائيات:\n"
+                f"- المجموعات النشطة: {len(active_groups)}\n"
+                f"- المستخدمين المفعلين: {len(user_status)}\n"
+                f"- الأسئلة المحلية: {len(SIMPLE_QA)}\n\n"
+                f"⚡ الأوامر:\n"
+                f"- /stats : إحصائيات مفصلة\n"
+                f"- /users : قائمة المستخدمين\n"
+                f"- /restart : إعادة تشغيل"
+            )
+            return
+        
+        elif user_message.lower() == "/stats":
+            total_messages = sum(len(msgs) for msgs in bot_messages.values())
+            stats_text = f"""
+📈 إحصائيات مفصلة - {DEVELOPER_NAME}
+
+👥 المستخدمين:
+- المفعلين: {len(user_status)}
+- أول 5 مستخدمين: {list(user_status.keys())[:5]}
+
+🏘️ المجموعات:
+- النشطة: {len(active_groups)}
+- المجموعات: {list(active_groups.keys())}
+
+💾 النظام:
+- الأسئلة المحلية: {len(SIMPLE_QA)}
+- الرسائل المحفوظة: {total_messages}
+- الذاكرة: {total_messages * 0.1:.1f} كيلوبايت
+"""
+            await update.message.reply_text(stats_text)
+            return
+            
+        elif user_message.lower() == "/users":
+            users_list = "\n".join([f"- {user_id}" for user_id in list(user_status.keys())[:10]])
+            await update.message.reply_text(f"👥 آخر 10 مستخدمين:\n{users_list}")
+            return
+    
+    # ⬇️ إعفاء المطور من التحقق
+    if is_developer(user_id):
+        user_status[user_id] = True
+    
     if update.message.chat.type == "private":
         if user_id not in user_status or not user_status[user_id]:
             await update.message.reply_text("❗️ يجب التحقق من الاشتراك أولاً", reply_markup=create_main_keyboard())
             return
         
-        await update.message.chat.send_action(action=ChatAction.TYPING)
+        try:
+            await update.message.chat.send_action(action=ChatAction.TYPING)
+        except Exception as e:
+            logger.warning(f"⚠️ خطأ في send_action: {e}")
+        
         try:
             local_answer = get_local_answer(user_message)
             if local_answer:
@@ -249,7 +342,11 @@ async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
         is_mention = any(keyword in user_message.lower() for keyword in ["قمر", "@userhak_bot"])
         
         if is_reply_to_bot or is_mention:
-            await update.message.chat.send_action(action=ChatAction.TYPING)
+            try:
+                await update.message.chat.send_action(action=ChatAction.TYPING)
+            except Exception as e:
+                logger.warning(f"⚠️ خطأ في send_action: {e}")
+            
             asyncio.create_task(handle_ai_response(user_message, update.message.message_id, chat_id, context))
 
 # ========== التشغيل الرئيسي ==========
@@ -269,6 +366,7 @@ def main():
         
         logger.info("🚀 البوت قمر يعمل...")
         logger.info(f"💾 النظام المحلي: {len(SIMPLE_QA)} سؤال")
+        logger.info(f"👑 المطور: {DEVELOPER_NAME} ({DEVELOPER_ID})")
         logger.info("🔒 نظام الاشتراك: القناة فقط")
         
         application.run_polling()
